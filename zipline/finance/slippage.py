@@ -23,6 +23,7 @@ import numpy as np
 from pandas import isnull
 
 from zipline.assets import Equity, Future
+from zipline.errors import HistoryWindowStartsBeforeData
 from zipline.finance.constants import ROOT_SYMBOL_TO_ETA
 from zipline.finance.transaction import create_transaction
 from zipline.utils.cache import ExpiringCache
@@ -36,8 +37,7 @@ LIMIT = 1 << 3
 SQRT_252 = math.sqrt(252)
 
 DEFAULT_EQUITY_VOLUME_SLIPPAGE_BAR_LIMIT = 0.025
-DEFAULT_FUTURE_VOLUME_SLIPPAGE_BAR_LIMIT = 0.025
-NO_DATA_VOLATILITY_SLIPPAGE_IMPACT = 10.0 / 10000
+DEFAULT_FUTURE_VOLUME_SLIPPAGE_BAR_LIMIT = 0.05
 
 
 class LiquidityExceeded(Exception):
@@ -290,11 +290,13 @@ class FixedSlippage(SlippageModel):
         )
 
 
-class MarketImpactBase(object):
+class MarketImpactBase(SlippageModel):
     """
     Base class for slippage models which compute a simulated price impact
     according to a history lookback.
     """
+
+    NO_DATA_VOLATILITY_SLIPPAGE_IMPACT = 10.0 / 10000
 
     def __init__(self):
         super(MarketImpactBase, self).__init__()
@@ -317,13 +319,13 @@ class MarketImpactBase(object):
         raise NotImplementedError('get_txn_volume')
 
     @abstractmethod
-    def simulated_impact(self,
-                         order,
-                         current_price,
-                         current_volume,
-                         txn_volume,
-                         mean_volume,
-                         volatility):
+    def get_simulated_impact(self,
+                             order,
+                             current_price,
+                             current_volume,
+                             txn_volume,
+                             mean_volume,
+                             volatility):
         """
         Calculate simulated price impact.
 
@@ -340,7 +342,7 @@ class MarketImpactBase(object):
         ------
         int : impact on the current price.
         """
-        raise NotImplementedError('simulated_impact')
+        raise NotImplementedError('get_simulated_impact')
 
     def process_order(self, data, order):
         if order.open_amount == 0:
@@ -368,7 +370,7 @@ class MarketImpactBase(object):
         if mean_volume == 0 or np.isnan(volatility):
             # If this is the first day the contract exists or there is no
             # volume history, default to a conservative estimate of impact.
-            simulated_impact = price * NO_DATA_VOLATILITY_SLIPPAGE_IMPACT
+            simulated_impact = price * self.NO_DATA_VOLATILITY_SLIPPAGE_IMPACT
         else:
             simulated_impact = self.get_simulated_impact(
                 order=order,
@@ -407,14 +409,20 @@ class MarketImpactBase(object):
         try:
             values = self._window_data_cache.get(asset, data.current_session)
         except KeyError:
-            # Add a day because we want 'window_length' complete days,
-            # excluding the current day.
-            volume_history = data.history(
-                asset, 'volume', window_length + 1, '1d',
-            )
-            close_history = data.history(
-                asset, 'close', window_length + 1, '1d',
-            )
+            try:
+                # Add a day because we want 'window_length' complete days,
+                # excluding the current day.
+                volume_history = data.history(
+                    asset, 'volume', window_length + 1, '1d',
+                )
+                close_history = data.history(
+                    asset, 'close', window_length + 1, '1d',
+                )
+            except HistoryWindowStartsBeforeData:
+                # If there is not enough data to do a full history call, return
+                # values as if there was no data.
+                return 0, np.NaN
+
             # Exclude the first value of the percent change array because it is
             # always just NaN.
             close_volatility = close_history[:-1].pct_change()[1:].std(
@@ -429,7 +437,7 @@ class MarketImpactBase(object):
         return values['volume'], values['close']
 
 
-class VolatilityVolumeShare(MarketImpactBase, FutureSlippageModel):
+class VolatilityVolumeShare(MarketImpactBase):
     """
     Model slippage for futures contracts according to the following formula:
 
@@ -453,6 +461,8 @@ class VolatilityVolumeShare(MarketImpactBase, FutureSlippageModel):
         for all futures contracts is the same. If given a dictionary, it must
         map root symbols to the eta for contracts of that symbol.
     """
+
+    NO_DATA_VOLATILITY_SLIPPAGE_IMPACT = 7.5 / 10000
     allowed_asset_types = (Future,)
 
     def __init__(self, volume_limit, eta=ROOT_SYMBOL_TO_ETA):
