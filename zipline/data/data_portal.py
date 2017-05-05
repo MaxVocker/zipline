@@ -915,9 +915,7 @@ class DataPortal(object):
         # contract according to tick size.
         decimals = {}
         for asset in df:
-            if isinstance(asset, Equity):
-                decimals[asset] = DEFAULT_DECIMAL_PLACES
-            elif isinstance(asset, Future):
+            if isinstance(asset, Future):
                 decimals[asset] = number_of_decimal_places(asset.tick_size)
             elif isinstance(asset, ContinuousFuture):
                 contract = self.get_spot_value(
@@ -933,7 +931,8 @@ class DataPortal(object):
                     # number of decimal places.
                     decimals[asset] = DEFAULT_DECIMAL_PLACES
             else:
-                raise ValueError("Unexpected asset '{}'.".format(asset))
+                # For equities and any other non-asset types, use the default.
+                decimals[asset] = DEFAULT_DECIMAL_PLACES
 
         df = df.round(decimals)
 
