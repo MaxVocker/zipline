@@ -799,15 +799,16 @@ class VolatilityVolumeShareTestCase(WithCreateBarData,
 
     def test_calculate_impact_without_history(self):
         model = VolatilityVolumeShare(volume_limit=1)
+        late_start_asset = self.asset_finder.retrieve_asset(1000)
         early_start_asset = self.asset_finder.retrieve_asset(1001)
 
         cases = [
             # History will look for data before the start date.
             (pd.Timestamp('2006-01-05 11:35AM', tz='UTC'), early_start_asset),
             # Start day of the futures contract; no history yet.
-            (pd.Timestamp('2006-02-10 11:35AM', tz='UTC'), self.ASSET),
+            (pd.Timestamp('2006-02-10 11:35AM', tz='UTC'), late_start_asset),
             # Only a week's worth of history data.
-            (pd.Timestamp('2006-02-17 11:35AM', tz='UTC'), self.ASSET),
+            (pd.Timestamp('2006-02-17 11:35AM', tz='UTC'), late_start_asset),
         ]
 
         for minute, asset in cases:
@@ -861,19 +862,6 @@ class MarketImpactTestCase(WithCreateBarData, ZiplineTestCase):
     ASSET_FINDER_EQUITY_SIDS = (1,)
 
     @classmethod
-    def init_class_fixtures(cls):
-        super(MarketImpactTestCase, cls).init_class_fixtures()
-
-        class TestMarketImpact(MarketImpactBase):
-            def get_txn_volume(*args, **kwargs):
-                pass
-
-            def get_simulated_impact(*args, **kwargs):
-                pass
-
-        cls.market_impact_instance = TestMarketImpact()
-
-    @classmethod
     def make_equity_minute_bar_data(cls):
         trading_calendar = cls.trading_calendars[Equity]
         return create_minute_bar_data(
@@ -890,7 +878,7 @@ class MarketImpactTestCase(WithCreateBarData, ZiplineTestCase):
         data = self.create_bardata(simulation_dt_func=lambda: minute)
         asset = self.asset_finder.retrieve_asset(1)
 
-        mean_volume, volatility = self.market_impact_instance._get_window_data(
+        mean_volume, volatility = MarketImpactBase()._get_window_data(
             data, asset, window_length=20,
         )
 
