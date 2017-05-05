@@ -58,7 +58,8 @@ from zipline.data.us_equity_pricing import NoDataOnDate
 from zipline.utils.math_utils import (
     nansum,
     nanmean,
-    nanstd
+    nanstd,
+    number_of_decimal_places,
 )
 from zipline.utils.memoize import remember_last, weak_lru_cache
 from zipline.utils.pandas_utils import timedelta_to_integral_minutes
@@ -91,6 +92,9 @@ OHLCVP_FIELDS = frozenset([
 ])
 
 HISTORY_FREQUENCIES = set(["1m", "1d"])
+
+# Default number of decimal places used for rounding asset prices.
+DEFAULT_DECIMAL_PLACES = 3
 
 DEFAULT_MINUTE_HISTORY_PREFETCH = 1560
 DEFAULT_DAILY_HISTORY_PREFETCH = 40
@@ -905,6 +909,33 @@ class DataPortal(object):
                                                      field)
         else:
             raise ValueError("Invalid frequency: {0}".format(frequency))
+
+        # Round prices according to asset type. The number of decimal places
+        # used for rounding is constant for all equities, but varies by future
+        # contract according to tick size.
+        decimals = {}
+        for asset in df:
+            if isinstance(asset, Equity):
+                decimals[asset] = DEFAULT_DECIMAL_PLACES
+            elif isinstance(asset, Future):
+                decimals[asset] = number_of_decimal_places(asset.tick_size)
+            elif isinstance(asset, ContinuousFuture):
+                contract = self.get_spot_value(
+                    asset, 'contract', end_dt, frequency,
+                )
+                if contract:
+                    decimals[asset] = number_of_decimal_places(
+                        contract.tick_size,
+                    )
+                else:
+                    # If there is no current contract found for the continuous
+                    # future on the given date then fall back on the default
+                    # number of decimal places.
+                    decimals[asset] = DEFAULT_DECIMAL_PLACES
+            else:
+                raise ValueError("Unexpected asset '{}'.".format(asset))
+
+        df = df.round(decimals)
 
         # forward-fill price
         if field == "price":
