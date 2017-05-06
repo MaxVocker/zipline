@@ -98,6 +98,24 @@ class TestWilliamsR(ZiplineTestCase):
 
         assert_equal(out, expected_result)
 
+        highs = np.full((14, 3), nan)
+        expected_highest_highs = np.array([nan, nan, nan])
+
+        lows = np.full((14, 3), nan)
+        expected_lowest_lows = np.array([nan, nan, nan])
+
+        closes = np.full((14, 3), nan)
+        expected_closes = np.array([nan, nan, nan])
+
+        r.compute(today, assets, out, highs, lows, closes)
+
+        expected_result = -100 * (
+            (expected_highest_highs - expected_closes) /
+            (expected_highest_highs - expected_lowest_lows)
+        )
+
+        assert_equal(out, expected_result)
+
 
 class BollingerBandsTestCase(BasePipelineTestCase):
 
